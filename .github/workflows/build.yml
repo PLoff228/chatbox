@@ -28,7 +28,9 @@ jobs:
         run: pnpm --version
 
       - name: Install dependencies
-        run: pnpm install --ignore-engines
+        run: pnpm install
+        env:
+          PNPM_IGNORE_ENGINES: 1   # Отключает проверку версии Node
 
       - name: Build app
         run: pnpm run build
