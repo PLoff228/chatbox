@@ -19,8 +19,10 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - name: Install pnpm via corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
 
       - name: Install dependencies
         run: pnpm install --ignore-engines
@@ -29,7 +31,7 @@ jobs:
         run: pnpm run build
 
       - name: Package for Windows
-        run: npx electron-builder --win --publish never
+        run: pnpm exec electron-builder --win --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
