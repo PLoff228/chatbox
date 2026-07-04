@@ -27,6 +27,9 @@ jobs:
       - name: Verify pnpm
         run: pnpm --version
 
+      - name: Create dummy win sign script
+        run: echo "module.exports = () => {}" > custom_win_sign.js
+
       - name: Install dependencies
         run: pnpm install
         env:
