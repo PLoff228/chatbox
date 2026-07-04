@@ -36,10 +36,11 @@ jobs:
         run: pnpm run build
 
       - name: Package for Windows
-        run: pnpm exec electron-builder --win --publish never
+        run: npx electron-builder --win --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           UPDATE_CHANNEL: latest
+          NODE_OPTIONS: --experimental-specifier-resolution=node
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
