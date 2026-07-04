@@ -17,12 +17,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
 
-      - name: Install pnpm via corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
+      - name: Install pnpm globally
+        run: npm install -g pnpm
+
+      - name: Add npm global bin to PATH
+        run: echo "C:\Users\runneradmin\AppData\Roaming\npm" >> $env:GITHUB_PATH
+
+      - name: Verify pnpm
+        run: pnpm --version
 
       - name: Install dependencies
         run: pnpm install --ignore-engines
