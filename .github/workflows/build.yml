@@ -45,8 +45,17 @@ jobs:
           UPDATE_CHANNEL: latest
           NODE_OPTIONS: --experimental-specifier-resolution=node
 
+      - name: Pack app.asar (for updates)
+        run: npx asar pack release/app app.asar
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: ChatBox-Windows-Installer
           path: release/
+
+      - name: Upload app.asar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatBox-app-asar
+          path: app.asar
