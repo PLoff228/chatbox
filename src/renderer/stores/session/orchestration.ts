@@ -31,6 +31,7 @@ import {
   initializeTargetMessage,
   trackGenerateEvent,
 } from './utils'
+import { parseScheduledMessages, scheduleMessages } from './scheduler'
 
 const log = getLogger('session-orchestration')
 
@@ -287,6 +288,49 @@ export async function orchestrateGeneration(
 
     await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
     appleAppStore.tickAfterMessageGenerated()
+
+    // ---- Парсинг запланированных сообщений ----
+    const fullText = getMessageText(targetMsg, true, true)
+    const { immediateText, scheduled } = parseScheduledMessages(fullText)
+
+    if (scheduled.length > 0) {
+      if (immediateText !== null) {
+        // Обычный ответ: есть основной текст и запланированные
+        const updatedContentParts = targetMsg.contentParts.map((part) => {
+          if (part.type === 'text') {
+            return { ...part, text: immediateText }
+          }
+          return part
+        })
+        targetMsg = {
+          ...targetMsg,
+          contentParts: updatedContentParts,
+          scheduledMessages: scheduled.map((s) => ({
+            id: `sched_${Date.now()}_${Math.random()}`,
+            text: s.text,
+            sendAt: s.sendAt.toISOString(),
+            sent: false,
+          })),
+        }
+        await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+        scheduleMessages(sessionId, targetMsg.id, targetMsg.scheduledMessages!)
+      } else {
+        // Ответ на сигнал: нет немедленного текста, только запланированные
+        // Сохраняем запланированные в текущем сообщении (оно пустое)
+        targetMsg = {
+          ...targetMsg,
+          scheduledMessages: scheduled.map((s) => ({
+            id: `sched_${Date.now()}_${Math.random()}`,
+            text: s.text,
+            sendAt: s.sendAt.toISOString(),
+            sent: false,
+          })),
+        }
+        await persistStreamingMessage(sessionId, targetMsg, { refreshCounting: true })
+        scheduleMessages(sessionId, targetMsg.id, targetMsg.scheduledMessages!)
+      }
+    }
+    // ---- Конец парсинга ----
   } catch (err: unknown) {
     if (controller.signal.aborted) {
       targetMsg = {
