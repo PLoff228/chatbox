@@ -3,22 +3,15 @@ import { z } from 'zod'
 import { SessionSettingsSchema } from '../types/settings'
 import { ModelProviderEnum } from './provider'
 
-// Re-export for backward compatibility
 export { ModelProviderEnum } from './provider'
 
-// Token cache key schema
 export const TokenCacheKeySchema = z.enum(['default', 'deepseek', 'default_preview', 'deepseek_preview'])
 export type TokenCacheKey = z.infer<typeof TokenCacheKeySchema>
-
-// Export the enum values directly for easy access
 export const TOKEN_CACHE_KEYS = TokenCacheKeySchema.enum
 
-// Token count map schema - use passthrough to allow any string keys for backward compatibility
 export const TokenCountMapSchema = z.record(z.string(), z.number())
-
 export type TokenCountMap = z.infer<typeof TokenCountMapSchema>
 
-// Token calculated at schema - timestamp for each tokenizer type
 export const TokenCalculatedAtSchema = z
   .object({
     default: z.number().optional(),
@@ -27,21 +20,17 @@ export const TokenCalculatedAtSchema = z
     deepseek_preview: z.number().optional(),
   })
   .optional()
-
 export type TokenCalculatedAt = z.infer<typeof TokenCalculatedAtSchema>
 
-// Search result schemas
 export const SearchResultItemSchema = z.object({
   title: z.string(),
   link: z.string(),
   snippet: z.string(),
 })
-
 export const SearchResultSchema = z.object({
   items: z.array(SearchResultItemSchema),
 })
 
-// Message file schemas
 export const MessageFileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -92,34 +81,28 @@ export const MessageRoleEnum = {
   Assistant: 'assistant',
   Tool: 'tool',
 } as const
-
 export type MessageRole = (typeof MessageRoleEnum)[keyof typeof MessageRoleEnum]
 
-// Message content part schemas
 export const MessageTextPartSchema = z.object({
   type: z.literal('text'),
   text: z.string(),
 })
-
 export const MessageImagePartSchema = z.object({
   type: z.literal('image'),
   storageKey: z.string(),
   ocrResult: z.string().optional(),
 })
-
 export const MessageInfoPartSchema = z.object({
   type: z.literal('info'),
   text: z.string(),
   values: z.record(z.string(), z.unknown()).optional(),
 })
-
 export const MessageReasoningPartSchema = z.object({
   type: z.literal('reasoning'),
   text: z.string(),
   startTime: z.number().optional(),
   duration: z.number().optional(),
 })
-
 export const MessageToolCallPartSchema = z.object({
   type: z.literal('tool-call'),
   state: z.enum(['call', 'result', 'error']),
@@ -128,7 +111,6 @@ export const MessageToolCallPartSchema = z.object({
   args: z.unknown(),
   result: z.unknown().optional(),
 })
-
 export const MessageContentPartSchema = z.discriminatedUnion('type', [
   MessageTextPartSchema,
   MessageImagePartSchema,
@@ -136,9 +118,7 @@ export const MessageContentPartSchema = z.discriminatedUnion('type', [
   MessageReasoningPartSchema,
   MessageToolCallPartSchema,
 ])
-
 export const MessageContentPartsSchema = z.array(MessageContentPartSchema)
-
 export const StreamTextResultSchema = z.object({
   contentParts: MessageContentPartsSchema,
   reasoningContent: z.string().optional(),
@@ -146,57 +126,34 @@ export const StreamTextResultSchema = z.object({
   finishReason: z.string().optional(),
 })
 
-// Tool and provider schemas
 export const ToolUseScopeSchema = z.enum(['web-browsing', 'knowledge-base', 'read-file'])
-
 export const ModelProviderSchema = z.union([z.nativeEnum(ModelProviderEnum), z.string()])
 
-// Message status schemas
 export const MessageStatusSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('sending_file'),
-    mode: z.enum(['local', 'advanced']).optional(),
-  }),
-  z.object({
-    type: z.literal('loading_webpage'),
-    mode: z.enum(['local', 'advanced']).optional(),
-  }),
-  z.object({
-    type: z.literal('retrying'),
-    attempt: z.number(),
-    maxAttempts: z.number(),
-    error: z.string().optional(),
-  }),
+  z.object({ type: z.literal('sending_file'), mode: z.enum(['local', 'advanced']).optional() }),
+  z.object({ type: z.literal('loading_webpage'), mode: z.enum(['local', 'advanced']).optional() }),
+  z.object({ type: z.literal('retrying'), attempt: z.number(), maxAttempts: z.number(), error: z.string().optional() }),
 ])
 
-// Main Message schema
-// Define a custom function type for cancel
 const CancelFunctionSchema = z.custom<(() => void) | undefined>(
   (val) => val === undefined || typeof val === 'function',
   { message: 'Must be a function or undefined' }
 )
-
 const MessageUsageSchema = z.object({
   inputTokens: z.number().optional().catch(undefined),
-  /**
-  The number of output (completion) tokens used.
-     */
   outputTokens: z.number().optional().catch(undefined),
-  /**
-  The total number of tokens as reported by the provider.
-  This number might be different from the sum of `inputTokens` and `outputTokens`
-  and e.g. include reasoning tokens or other overhead.
-     */
   totalTokens: z.number().optional().catch(undefined),
-  /**
-  The number of reasoning tokens used.
-     */
   reasoningTokens: z.number().optional().catch(undefined),
-  /**
-  The number of cached input tokens.
-     */
   cachedInputTokens: z.number().optional().catch(undefined),
 })
+
+export const ScheduledMessageSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  sendAt: z.string(),
+  sent: z.boolean().optional(),
+})
+export type ScheduledMessage = z.infer<typeof ScheduledMessageSchema>
 
 export const MessageSchema = z.object({
   id: z.string(),
@@ -217,39 +174,35 @@ export const MessageSchema = z.object({
   errorExtra: z.record(z.string(), z.unknown()).optional(),
   status: z.array(MessageStatusSchema).optional(),
   wordCount: z.number().optional(),
-  tokenCount: z.number().optional(), // output token count
-  tokensUsed: z.number().optional(), // deprecated, use `usage` instead
+  tokenCount: z.number().optional(),
+  tokensUsed: z.number().optional(),
   usage: MessageUsageSchema.optional().catch(undefined),
   timestamp: z.number().optional(),
   firstTokenLatency: z.number().optional(),
   finishReason: z.string().optional(),
-  tokenCountMap: TokenCountMapSchema.optional(), // estimate token count as input
+  tokenCountMap: TokenCountMapSchema.optional(),
   tokenCalculatedAt: TokenCalculatedAtSchema,
   updatedAt: z.number().optional(),
-  isSummary: z.boolean().optional(), // Marks message as a compaction summary
+  isSummary: z.boolean().optional(),
+  scheduledMessages: z.array(ScheduledMessageSchema).optional(),
 })
 
-// Compaction point schema (for context management)
 export const CompactionPointSchema = z.object({
   summaryMessageId: z.string(),
   boundaryMessageId: z.string(),
   createdAt: z.number(),
 })
 
-// Session schemas
 export const SessionTypeSchema = z.enum(['chat', 'picture', 'guide'])
-
 export const MessageForkListSchema = z.object({
   id: z.string(),
   messages: z.array(MessageSchema),
 })
-
 export const MessageForkSchema = z.object({
   position: z.number(),
   lists: z.array(MessageForkListSchema),
   createdAt: z.number(),
 })
-
 export const SessionThreadSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -257,13 +210,10 @@ export const SessionThreadSchema = z.object({
   createdAt: z.number(),
   compactionPoints: z.array(CompactionPointSchema).optional(),
 })
-
-// Image source schema
 export const ImageSourceSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('url'), url: z.string() }),
   z.object({ type: z.literal('storage-key'), storageKey: z.string() }),
 ])
-
 export const SessionSchema = z.object({
   id: z.string(),
   type: SessionTypeSchema.optional(),
@@ -271,7 +221,7 @@ export const SessionSchema = z.object({
   picUrl: z.string().optional(),
   messages: z.array(MessageSchema),
   starred: z.boolean().optional(),
-  hidden: z.boolean().optional(), // Hidden from session list (e.g., migrated picture sessions)
+  hidden: z.boolean().optional(),
   copilotId: z.string().optional(),
   assistantAvatarKey: z.string().optional(),
   backgroundImage: ImageSourceSchema.optional(),
@@ -292,18 +242,15 @@ export const SessionMetaSchema = SessionSchema.pick({
   backgroundImage: true,
   type: true,
 })
-
 export const SessionMetaRecordSchema = SessionMetaSchema.extend({
   sortOrder: z.number(),
   createdAt: z.number(),
 })
-
 export const SessionMetaPageSchema = z.object({
   items: z.array(SessionMetaRecordSchema),
   nextCursor: z.number().nullable(),
   total: z.number(),
 })
-
 export const SessionThreadBriefSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -313,7 +260,6 @@ export const SessionThreadBriefSchema = z.object({
   messageCount: z.number(),
 })
 
-// Export types inferred from schemas
 export type SearchResultItem = z.infer<typeof SearchResultItemSchema>
 export type SearchResult = z.infer<typeof SearchResultSchema>
 export type MessageFile = z.infer<typeof MessageFileSchema>
