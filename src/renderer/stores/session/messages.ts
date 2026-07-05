@@ -20,6 +20,7 @@ import { ensureMessageFileSessionAttachment } from '../sessionAttachmentRagIndex
 import * as settingActions from '../settingActions'
 import { settingsStore } from '../settingsStore'
 import { getSessionWebBrowsing } from './utils'
+import { cancelAllScheduled } from './scheduler'
 
 const log = getLogger('session-messages')
 
@@ -66,11 +67,6 @@ async function attachLargeFileRagMetadata(sessionId: string, message: Message): 
   return updatedMessage
 }
 
-/**
- * 在当前主题的最后插入一条消息。
- * @param sessionId
- * @param msg
- */
 export async function insertMessage(sessionId: string, msg: Message) {
   const session = await chatStore.getSession(sessionId)
   if (!session) {
@@ -81,12 +77,6 @@ export async function insertMessage(sessionId: string, msg: Message) {
   return await chatStore.insertMessage(session.id, msg)
 }
 
-/**
- * 在某条消息后面插入新消息。如果消息在历史主题中，也能支持插入
- * @param sessionId
- * @param msg
- * @param afterMsgId
- */
 export async function insertMessageAfter(sessionId: string, msg: Message, afterMsgId: string) {
   const session = await chatStore.getSession(sessionId)
   if (!session) {
@@ -94,16 +84,9 @@ export async function insertMessageAfter(sessionId: string, msg: Message, afterM
   }
   msg.wordCount = countMessageWords(msg)
   msg.tokenCount = estimateTokensFromMessages([msg])
-
   await chatStore.insertMessage(sessionId, msg, afterMsgId)
 }
 
-/**
- * 根据 id 修改消息。如果消息在历史主题中，也能支持修改
- * @param sessionId
- * @param updated
- * @param refreshCounting
- */
 export async function modifyMessage(
   sessionId: string,
   updated: Message,
@@ -119,8 +102,6 @@ export async function modifyMessage(
     updated.tokenCount = estimateTokensFromMessages([updated])
     updated.tokenCountMap = undefined
   }
-
-  // 更新消息时间戳
   updated.timestamp = Date.now()
   if (updateOnlyCache) {
     await chatStore.updateMessageCache(sessionId, updated.id, updated)
@@ -129,10 +110,6 @@ export async function modifyMessage(
   }
 }
 
-/**
- * 流式输出期间的轻量级 UI 更新，仅更新 React Query 缓存触发重渲染。
- * 不涉及 storage 写入，不检查 session 存在性（性能优先）。
- */
 export function updateStreamingCache(sessionId: string, message: Message): void {
   message.timestamp = Date.now()
   chatStore.updateMessageCache(sessionId, message.id, message).catch((err) => {
@@ -140,10 +117,6 @@ export function updateStreamingCache(sessionId: string, message: Message): void 
   })
 }
 
-/**
- * 流式输出期间的持久化写入。用于定时 persist（2s 间隔）和最终 persist。
- * 可选刷新 wordCount/tokenCount。
- */
 export async function persistStreamingMessage(
   sessionId: string,
   message: Message,
@@ -158,11 +131,6 @@ export async function persistStreamingMessage(
   await chatStore.updateMessage(sessionId, message.id, message)
 }
 
-/**
- * 在会话中删除消息。如果消息存在于历史主题中，也能支持删除
- * @param sessionId
- * @param messageId
- */
 export async function removeMessage(sessionId: string, messageId: string) {
   if (platform.type === 'desktop') {
     try {
@@ -174,16 +142,12 @@ export async function removeMessage(sessionId: string, messageId: string) {
   await chatStore.removeMessage(sessionId, messageId)
 }
 
-/**
- * 在会话中发送新用户消息，并根据需要生成回复
- * @param params
- */
 export async function submitNewUserMessage(
   sessionId: string,
   params: { newUserMsg: Message; needGenerating: boolean; onUserMessageReady?: () => void }
 ) {
-  // Import generate lazily to avoid circular dependency
-  // generate will be moved to generation.ts in US-006, then this import will change
+  cancelAllScheduled(sessionId)
+
   const { generate } = await import('../sessionActions.js')
 
   const session = await chatStore.getSession(sessionId)
@@ -192,8 +156,6 @@ export async function submitNewUserMessage(
     return
   }
 
-  // Run compaction check before sending message (blocking)
-  // Only for chat sessions with auto-compaction enabled
   if (session.type === 'chat' || session.type === undefined) {
     const compactionResult = await runCompactionWithUIState(sessionId)
     if (!compactionResult.success) {
@@ -201,15 +163,22 @@ export async function submitNewUserMessage(
     }
   }
 
-  // Invoke callback after compaction succeeds, before user message is inserted
-  // This allows caller to clear draft at the right time
   params.onUserMessageReady?.()
 
   let { newUserMsg } = params
   const { needGenerating } = params
-  const webBrowsing = getSessionWebBrowsing(sessionId, settings.provider)
 
-  // 先在聊天列表中插入发送的用户消息
+  // Добавляем временную метку к сообщению пользователя (UTC)
+  const now = new Date().toISOString()
+  if (newUserMsg.contentParts && newUserMsg.contentParts.length > 0) {
+    const textPart = newUserMsg.contentParts.find(p => p.type === 'text')
+    if (textPart) {
+      textPart.text = `${textPart.text} (${now})`
+    }
+  } else {
+    newUserMsg.contentParts = [{ type: 'text', text: `(${now})` }]
+  }
+
   await insertMessage(sessionId, newUserMsg)
   newUserMsg = await attachLargeFileRagMetadata(sessionId, newUserMsg)
 
@@ -217,7 +186,6 @@ export async function submitNewUserMessage(
   const isPro = settingActions.isPro()
   const remoteConfig = await settingActions.getRemoteConfig()
 
-  // 根据需要，插入空白的回复消息
   let newAssistantMsg = createMessage('assistant', '')
   if (newUserMsg.files && newUserMsg.files.length > 0) {
     if (!newAssistantMsg.status) {
@@ -243,33 +211,15 @@ export async function submitNewUserMessage(
   }
 
   try {
-    // 如果本次消息开启了联网问答，需要检查当前模型是否支持
-    // 桌面版&手机端总是支持联网问答，不再需要检查模型是否支持
     const model = await createModel(settings)
-    if (webBrowsing && platform.type === 'web' && !model.isSupportToolUse()) {
+    if (getSessionWebBrowsing(sessionId, settings.provider) && platform.type === 'web' && !model.isSupportToolUse()) {
       if (remoteConfig.setting_chatboxai_first) {
         throw ChatboxAIAPIError.fromCodeName('model_not_support_web_browsing', 'model_not_support_web_browsing')
       } else {
         throw ChatboxAIAPIError.fromCodeName('model_not_support_web_browsing_2', 'model_not_support_web_browsing_2')
       }
     }
-
-    // Files and links are now preprocessed in InputBox with storage keys, so no need to process them here
-    // Just verify they have storage keys
-    if (newUserMsg.files?.length) {
-      const missingStorageKeys = newUserMsg.files.filter((f) => !f.storageKey)
-      if (missingStorageKeys.length > 0) {
-        console.warn('Files without storage keys found:', missingStorageKeys)
-      }
-    }
-    if (newUserMsg.links?.length) {
-      const missingStorageKeys = newUserMsg.links.filter((l) => !l.storageKey)
-      if (missingStorageKeys.length > 0) {
-        console.warn('Links without storage keys found:', missingStorageKeys)
-      }
-    }
   } catch (err: unknown) {
-    // 如果文件上传失败，一定会出现带有错误信息的回复消息
     const error = !(err instanceof Error) ? new Error(`${err}`) : err
     if (
       !(
@@ -278,13 +228,12 @@ export async function submitNewUserMessage(
         error instanceof AIProviderNoImplementedPaintError
       )
     ) {
-      Sentry.captureException(error) // unexpected error should be reported
+      Sentry.captureException(error)
     }
     let errorCode: number | undefined
     if (err instanceof BaseError) {
       errorCode = err.code
     }
-
     newAssistantMsg = {
       ...newAssistantMsg,
       generating: false,
@@ -292,7 +241,7 @@ export async function submitNewUserMessage(
       model: await getModelDisplayName(settings, globalSettings, 'chat'),
       contentParts: [{ type: 'text', text: '' }],
       errorCode,
-      error: `${error.message}`, // 这么写是为了避免类型问题
+      error: `${error.message}`,
       status: [],
     }
     if (needGenerating) {
@@ -300,9 +249,9 @@ export async function submitNewUserMessage(
     } else {
       await insertMessage(sessionId, newAssistantMsg)
     }
-    return // 文件上传失败，不再继续生成回复
+    return
   }
-  // 根据需要，生成这条回复消息
+
   if (needGenerating) {
     return generate(sessionId, newAssistantMsg, { operationType: 'send_message' })
   }
